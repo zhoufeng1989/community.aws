@@ -2,7 +2,8 @@
 # This file is part of Ansible
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-from __future__ import (absolute_import, division, print_function)
+from __future__ import absolute_import, division, print_function
+
 __metaclass__ = type
 
 DOCUMENTATION = r'''
@@ -666,13 +667,13 @@ DEPLOYMENT_CONFIGURATION_TYPE_MAP = {
     'deployment_circuit_breaker': 'dict',
 }
 
-from ansible.module_utils.common.dict_transformations import snake_dict_to_camel_dict
-
-from ansible_collections.amazon.aws.plugins.module_utils.core import AnsibleAWSModule
-from ansible_collections.amazon.aws.plugins.module_utils.ec2 import map_complex_type
-from ansible_collections.amazon.aws.plugins.module_utils.ec2 import get_ec2_security_group_ids_from_names
-from ansible_collections.amazon.aws.plugins.module_utils.ec2 import ansible_dict_to_boto3_tag_list
-from ansible_collections.amazon.aws.plugins.module_utils.ec2 import boto3_tag_list_to_ansible_dict
+from ansible.module_utils.common.dict_transformations import \
+    snake_dict_to_camel_dict
+from ansible_collections.amazon.aws.plugins.module_utils.core import \
+    AnsibleAWSModule
+from ansible_collections.amazon.aws.plugins.module_utils.ec2 import (
+    ansible_dict_to_boto3_tag_list, boto3_tag_list_to_ansible_dict,
+    get_ec2_security_group_ids_from_names, map_complex_type)
 
 try:
     import botocore
@@ -822,7 +823,7 @@ class EcsServiceManager:
     def update_service(self, service_name, cluster_name, task_definition, desired_count,
                        deployment_configuration, placement_constraints, placement_strategy,
                        network_configuration, health_check_grace_period_seconds,
-                       force_new_deployment, capacity_provider_strategy):
+                       force_new_deployment, capacity_provider_strategy, load_balancers):
         params = dict(
             cluster=cluster_name,
             service=service_name,
@@ -846,6 +847,9 @@ class EcsServiceManager:
         # desired count is not required if scheduling strategy is daemon
         if desired_count is not None:
             params['desiredCount'] = desired_count
+        
+        if load_balancers:
+            params['loadBalancers'] = load_balancers
 
         response = self.ecs.update_service(**params)
         return self.jsonize(response['service'])
@@ -1024,8 +1028,9 @@ def main():
                     if module.params['launch_type']:
                         if 'capacityProviderStrategy' in existing.keys():
                             module.fail_json(msg="It is not possible to change an existing service from capacity_provider_strategy to launch_type.")
+                    # fails if deployment type is not CODE_DEPLOY or ECS
                     if (existing['loadBalancers'] or []) != loadBalancers:
-                        if existing['deploymentController']['type'] != 'CODE_DEPLOY':
+                        if existing['deploymentController']['type'] not in ['CODE_DEPLOY', 'ECS']:
                             module.fail_json(msg="It is not possible to update the load balancers of an existing service")
 
                     if existing.get('deploymentController', {}).get('type', None) == 'CODE_DEPLOY':
@@ -1040,6 +1045,7 @@ def main():
                     if module.params['tags'] and boto3_tag_list_to_ansible_dict(existing['tags']) != module.params['tags']:
                         module.fail_json(msg="It is not currently supported to change tags of an existing service")
 
+                    updatedLoadBalancers = loadBalancers if existing['deploymentController']['type'] == 'ECS' else []
                     # update required
                     response = service_mgr.update_service(module.params['name'],
                                                           module.params['cluster'],
@@ -1052,6 +1058,7 @@ def main():
                                                           module.params['health_check_grace_period_seconds'],
                                                           module.params['force_new_deployment'],
                                                           capacityProviders,
+                                                          updatedLoadBalancers,
                                                           )
 
                 else:
